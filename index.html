@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Day 4 - Audio Fingerprinting Demo</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                margin: 40 px;
+            }
+            canvas {
+                width: 600px;
+                height: 200px;
+                border: 1px solid #ccc;
+                margin-top: 20px;
+            }
+            #hash {
+                margin-top: 20px;
+                font-family: monospace;
+                word-break: break-all;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1> Audio Fingerprinting (Day 4)</h1>
+        
+        <input type="file" id="fileInput" accept="audio/*" />
+
+        <h3>Waveform</h3>
+        <canvas id="waveCanvas"></canvas>
+
+        <h3>Spectrum (FFT)</h3>
+        <canvas id="fftCanvas"></canvas>
+
+        <h3>Fingerprint Hash</h3>
+        <div id="hash">Upload an audio file to generate hash...</div>
+
+        <script src="audio.js"></script>
+    </body>
+</html>
