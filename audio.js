@@ -1,166 +1,135 @@
-const fileInput = document.getElementById("fileInput");
-const hashDiv = document.getElementById("hash");
-const waveCanvas = document.getElementById("waveCanvas");
-const fftCanvas = document.getElementById("fftCanvas");
+// DOM elements
+const audioFileInput = document.getElementById('audioFile');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const player = document.getElementById('player');
+const waveformCanvas = document.getElementById('waveformCanvas');
+const fftCanvas = document.getElementById('fftCanvas');
+const fingerprintHashEl = document.getElementById('fingerprintHash');
+const liveCanvas = document.getElementById('liveCanvas');
 
-const waveCtx = waveCanvas.getContext("2d");
-const fftCtx = fftCanvas.getContext("2d");
+const waveformCtx = waveformCanvas.getContext('2d');
+const fftCtx = fftCanvas.getContext('2d');
+const liveCtx = liveCanvas.getContext('2d');
 
-fileInput.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let audioBuffer;
 
-    // Read file -> ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer();
+// Offline analysis (no playback)
+analyzeBtn.addEventListener('click', () => {
+  const file = audioFileInput.files[0];
+  if (!file) return alert('Please select an audio file.');
 
-    // Decode audio using Web Audio API
-    const audioCtx = new AudioContext();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const channelData = audioBuffer.getChannelData(0); // Use channel 1 for now
+  const reader = new FileReader();
+  reader.onload = e => {
+    const arrayBuffer = e.target.result;
+    audioCtx.decodeAudioData(arrayBuffer)
+      .then(buffer => {
+        audioBuffer = buffer;
+        // Set audio src for playback (user must click play)
+        player.src = URL.createObjectURL(file);
 
-    drawWaveform(channelData);
-    const spectrum = computeFFT(channelData, audioCtx.sampleRate);
-    drawSpectrum(spectrum);
-
-    const fingerprint = extractFingerprint(spectrum);
-    const hash = await sha256(fingerprint);
-    
-    hashDiv.textContent = hash;
+        // Offline static analysis
+        drawWaveform(buffer);
+        drawStaticFFT(buffer);
+        computeFingerprint(buffer);
+      })
+      .catch(err => console.error('Error decoding audio:', err));
+  };
+  reader.readAsArrayBuffer(file);
 });
 
-// -----------------
-// Waveform Visualization
-// -----------------
+// Draw static waveform from buffer
+function drawWaveform(buffer) {
+  waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+  const data = buffer.getChannelData(0);
+  const step = Math.ceil(data.length / waveformCanvas.width);
 
-function drawWaveform(data) {
-    waveCtx.clearRect(0, 0, waveCanvas.clientWidth, waveCanvas.width);
-    const amp = waveCanvas.height / 2;
-
-    waveCtx.beginPath();
-    waveCtx.moveTo(0, amp);
-
-    for (let i = 0; i < waveCanvas.width; i++) {
-        const min = data[i * step] * amp + amp;
-        waveCtx.lineTo(i, min);
-    }
-
-    waveCtx.strokeStyle = "#333";
-    waveCtx.stroke();
-}
-
-// -----------------
-// FFT (frequency domain)
-// -----------------
-function computeFFT(channelData, sampleRate) {
-    const fftSize = 2048; // small = fast enough for demo
-    const buffer = channelData.slice(0, fftSize);
-
-    // Apply a simple window (Hann)
-    for (let i = 0; i < fftSize; i++) {
-        buffer[i] *= 0.5 * (1 - Maath.cos((2 * Math.PI * i) / (fftSize - 1)));
-    }
-
-    // Compute FFT
-    const real = buffer.slice();
-    const imag = new Float32Array(fftSize);
-
-    fft(real, imag);
-
-    const spectrum = real.map((re, i) => Math.sqrt(re*re + imag[i]*imag[i]));
-    return spectrum;
-}
-// -----------------------------
-// Simple FFT implementation
-// (Cooley-Tukey, radix-2)
-// -----------------------------
-function fft(real, imag) {
-  const n = real.length;
-
-  // Bit-reversed addressing
-  let j = 0;
-  for (let i = 0; i < n; i++) {
-    if (i < j) {
-      [real[i], real[j]] = [real[j], real[i]];
-      [imag[i], imag[j]] = [imag[j], imag[i]];
-    }
-    let m = n >> 1;
-    while (m >= 1 && j >= m) {
-      j -= m;
-      m >>= 1;
-    }
-    j += m;
+  waveformCtx.beginPath();
+  for (let i = 0; i < waveformCanvas.width; i++) {
+    const slice = data.slice(i*step, (i+1)*step);
+    const min = Math.min(...slice);
+    const max = Math.max(...slice);
+    waveformCtx.moveTo(i, (1 + min) * waveformCanvas.height/2);
+    waveformCtx.lineTo(i, (1 + max) * waveformCanvas.height/2);
   }
-
-  // Danielson–Lanczos
-  for (let size = 2; size <= n; size <<= 1) {
-    const half = size >> 1;
-    const tableStep = n / size;
-
-    for (let i = 0; i < n; i += size) {
-      for (let j = 0; j < half; j++) {
-        const k = j * tableStep;
-        const tRe = Math.cos((-2 * Math.PI * k) / n);
-        const tIm = Math.sin((-2 * Math.PI * k) / n);
-
-        const uRe = real[i + j];
-        const uIm = imag[i + j];
-
-        const vRe = real[i + j + half] * tRe - imag[i + j + half] * tIm;
-        const vIm = real[i + j + half] * tIm + imag[i + j + half] * tRe;
-
-        real[i + j] = uRe + vRe;
-        imag[i + j] = uIm + vIm;
-
-        real[i + j + half] = uRe - vRe;
-        imag[i + j + half] = uIm - vIm;
-      }
-    }
-  }
+  waveformCtx.stroke();
 }
 
-// -----------------------------
-// Spectrum Visualization
-// -----------------------------
-function drawSpectrum(spectrum) {
+// Compute FFT offline (static)
+function drawStaticFFT(buffer) {
   fftCtx.clearRect(0, 0, fftCanvas.width, fftCanvas.height);
-  const barWidth = fftCanvas.width / spectrum.length;
 
-  const max = Math.max(...spectrum);
+  const data = buffer.getChannelData(0);
+  const n = 2048;
+  const slice = data.slice(0, n);
+  const magnitudes = new Float32Array(n/2);
 
-  for (let i = 0; i < spectrum.length; i++) {
-    const magnitude = spectrum[i] / max;
-    const h = magnitude * fftCanvas.height;
+  for (let k = 0; k < n/2; k++) {
+    let re = 0, im = 0;
+    for (let t = 0; t < n; t++) {
+      const angle = 2*Math.PI*k*t/n;
+      re += slice[t]*Math.cos(angle);
+      im -= slice[t]*Math.sin(angle);
+    }
+    magnitudes[k] = Math.sqrt(re*re + im*im);
+  }
 
-    fftCtx.fillStyle = "#444";
-    fftCtx.fillRect(i * barWidth, fftCanvas.height - h, barWidth, h);
+  const binWidth = fftCanvas.width / magnitudes.length;
+  for (let i = 0; i < magnitudes.length; i++) {
+    const mag = magnitudes[i] * 50; // scale for display
+    fftCtx.fillRect(i*binWidth, fftCanvas.height - mag, binWidth, mag);
   }
 }
 
-// -----------------------------
-// Feature Extraction → Fingerprint
-// -----------------------------
-function extractFingerprint(spectrum) {
-  // Downsample to 64 bins for simplicity
+// SHA-256 fingerprint offline
+async function computeFingerprint(buffer) {
+  const data = buffer.getChannelData(0);
   const bins = 64;
-  const chunk = Math.floor(spectrum.length / bins);
-
+  const step = Math.floor(data.length / bins);
   const fingerprint = [];
+
   for (let i = 0; i < bins; i++) {
-    const start = i * chunk;
-    const end = start + chunk;
-    const avg = spectrum.slice(start, end).reduce((a, b) => a + b, 0) / chunk;
-    fingerprint.push(avg);
+    const slice = data.slice(i*step, (i+1)*step);
+    fingerprint.push(Math.max(...slice).toFixed(5));
   }
 
-  return new Float32Array(fingerprint);
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(fingerprint.join(',')));
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
+  fingerprintHashEl.textContent = hashHex;
 }
 
-// -----------------------------
-// Hash (SHA-256)
-// -----------------------------
-async function sha256(data) {
-  const buffer = new Uint8Array(data.buffer);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-}
+// Live visualization during playback
+let analyserNode, sourceNode;
+player.addEventListener('play', async () => {
+  if (!audioBuffer) return;
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  // Stop previous source if any
+  if (sourceNode) sourceNode.disconnect();
+  if (analyserNode) analyserNode.disconnect();
+
+  sourceNode = audioCtx.createMediaElementSource(player);
+  analyserNode = audioCtx.createAnalyser();
+  analyserNode.fftSize = 2048;
+
+  sourceNode.connect(analyserNode);
+  analyserNode.connect(audioCtx.destination);
+
+  const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+
+  function renderLive() {
+    if (player.paused) return;
+    requestAnimationFrame(renderLive);
+    analyserNode.getByteFrequencyData(dataArray);
+
+    liveCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+    const barWidth = liveCanvas.width / dataArray.length;
+    for (let i = 0; i < dataArray.length; i++) {
+      const barHeight = dataArray[i];
+      liveCtx.fillRect(i*barWidth, liveCanvas.height - barHeight, barWidth, barHeight);
+    }
+  }
+  renderLive();
+});
