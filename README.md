@@ -50,3 +50,11 @@ This is a frontend prototype for an audio provenance system. Users can upload au
   - Clear separation of analysis and playback workflows
 - Event handler refactoring for clarity and maintainability
 - Fully functional frontend prototype, ready for future backend and ZK integration
+
+## Screenshots
+
+### Static Analysis (Waveform + FFT)
+![Static Analysis](screenshots/static_analysis.png)
+
+### Live Playback FFT Visualization
+![Live Playback](screenshots/live_visualizer.png)
